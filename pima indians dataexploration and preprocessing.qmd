@@ -1,0 +1,351 @@
+---
+title: "Final Project Diabeties Report"
+author: "Team 6"
+format: html
+editor: visual
+---
+
+# Introduction
+
+This project uses the Pima Indians Diabetes dataset from Kaggle to predict where a patient has diabetes based on medical measurements.
+
+# Problem Statment 
+
+The goal of this analysis is to build and compare classification models to predict diabetes status using variables such as glucose, blood pressure, BMI, insulin, and age. The model performance will be evaluated to select the best predictive model from this dataset.
+
+# Data Description
+
+```{r}
+library(tidyverse)
+library(caret)
+library(corrplot)
+library(rpart)
+library(rpart.plot)
+
+set.seed(123)
+```
+
+```{r}
+diabetes <- read.csv("C:/Users/chris/Downloads/archive (3)/diabetes.csv")
+head(diabetes)
+dim(diabetes)
+names(diabetes)
+```
+
+The dataset contains 768 rows and 9 columns. Outcome is the response variable and indicates whether the patient has diabetes; the other 8 are predictor variables.
+
+```{r}
+str(diabetes)
+```
+
+The data is all in numeric or integer variables
+
+```{r}
+summary(diabetes)
+
+# Gen AI inspired code for Clean summary statistics table
+summary_table <- diabetes %>%
+  summarise(across(everything(),
+                   list(
+                     Min = min,
+                     Q1 = ~quantile(.x, 0.25),
+                     Median = median,
+                     Mean = mean,
+                     Q3 = ~quantile(.x, 0.75),
+                     Max = max
+                   ))) %>%
+  pivot_longer(everything(),
+               names_to = c("Variable", "Statistic"),
+               names_sep = "_",
+               values_to = "Value") %>%
+  pivot_wider(names_from = Statistic,
+              values_from = Value) %>%
+  mutate(across(where(is.numeric), ~round(.x, 2)))
+
+knitr::kable(summary_table,
+             caption = "Summary Statistics for Diabetes Dataset")
+```
+
+The summary statistics show us the minimum, median, mean, and maximum values for each variable. The data set has 768 observations of measurements such as glucose, blood pressure, skin thickness, insulin, BMI, diabetes pedigree function, age, and diabetes outcome. Min is zero for all variables besides Age and Diabetes Pedigree function. The age range is 21-81, with a median of 29 and an average of 33.24, indicating that many people in the dataset can be considered young adults. The average outcome variable is 35% of patients have diabetes. The average glucose level is 120.89, which is close to the median, suggesting that high glucose values are bringing the average up. The same is true for BMI, which has a median of 32 and an average of 31.99. Many variables have a minimum of zero, which is unrealistic. It should be either missing or unrecorded data and should be reviewed before preprocessing and training.
+
+```{r}
+colSums(is.na(diabetes))
+table(diabetes$Outcome)
+prop.table(table(diabetes$Outcome))
+colSums(diabetes == 0)
+```
+
+The dataset has no missing NaN values, but there are many variables with 0 values, so we must decide if these are correct or need to be replaced or removed. There are 500 patients without diabetes and 268 with diabetes, and this should be kept in mind with modeling due to imbalance. Glucose has 5 zeros , bloodpressure had 35 zeros and skinthickness has 227, insulin has 374 zeros, BMI has 11 zeros. They should not be realistically zero which might be missing or unrecorded data and need to be dealt with before modeling
+
+# Data Exploration
+
+```{r}
+diabetes %>% mutate(diabetes_status = factor(Outcome, levels = c(0, 1),
+            labels = c("No Diabetes", "Diabetes"))) %>%
+ggplot(aes(x = diabetes_status)) +
+geom_bar(fill = "skyblue") +
+labs(title = "Distribution of Diabetes Outcome",
+x = "Outcome/Diabetes status",
+y = "Number of Patients") +
+theme_minimal()
+```
+
+The outcome bar chart shows that the dataset contains more patients without diabetes than with diabetes. There are 500 no-diabetes cases and 268 diabetes cases. This means the dataset is somewhat imbalanced, so model evaluation should consider more than accuracy alone.
+
+```{r}
+
+diabetes %>% select(Pregnancies, Glucose, BloodPressure, SkinThickness,
+         Insulin, BMI, DiabetesPedigreeFunction, Age) %>%
+  pivot_longer(cols = everything(), names_to = "Predictor",
+               values_to = "Value") %>%
+  
+ggplot(aes(x = Value)) +
+geom_histogram(bins = 30, fill = "skyblue", color = "black") +
+facet_wrap(~ Predictor, scales = "free") +
+labs(title = "Predictor Variables Distribution",
+x = "Measurement",
+y = "Number of Patients") +
+theme_minimal()
+```
+
+-   Age right skewed, most patients are younger, 20s and 30s, few older patients around 80
+
+-   Bloodpressure most values around 60-80 and some at zero which is unrealistic unless they died
+
+-   BMI most values around 20-40 and few 0 values that is also unrealistic
+
+-   DiabetesPedigreeFunction most values are low and is right skewed, with a few high values
+
+-   Glucose most values are at 100-150 but it also has some 0 values which is unrealistic
+
+-   Insulin has many zero values, which suggest missing values
+
+-   Pregnancies have a lower number of pregnancies and is also right skewed
+
+-   Skinthickness also has many 0 values, which is unrealistic
+
+```{r}
+diabetes %>%
+  select(Pregnancies, Glucose, BloodPressure, SkinThickness,
+         Insulin, BMI, DiabetesPedigreeFunction, Age) %>%
+pivot_longer(cols = everything(),names_to = "Predictor",
+               values_to = "Measurement") %>%
+ggplot(aes(x = Predictor, y = Measurement)) +
+geom_boxplot(fill = "skyblue", color = "black") +
+facet_wrap(~ Predictor, scales = "free") +
+labs(title = "Overall Boxplots of Predictors",
+      x = "Predictor Variable",
+      y = "Measurement") +
+theme_minimal() + theme(axis.text.x = element_blank())
+
+```
+
+Many predictors have outliers so median might be better for then mean for imputation.
+
+```{r}
+diabetes %>% mutate(diabetes_status = factor(Outcome,levels = c(0, 1),
+             labels = c("No Diabetes", "Diabetes"))) %>%
+select(-Outcome) %>%
+  pivot_longer(cols = -diabetes_status,names_to = "Predictor",
+               values_to = "Value") %>%
+ggplot(aes(x = diabetes_status, y = Value, fill = diabetes_status)) +
+geom_boxplot() + facet_wrap(~ Predictor, scales = "free") +
+labs(title = "Diabetes Outcome by Predictors",
+x = "Outcome",
+y = "Predictor value") +
+theme_minimal() + theme(legend.position = "none")
+```
+
+-   AGE: Patients with diabetes generally appear older than patients without diabetes. The diabetes group has a higher median age.
+
+-   BLOODPRESSURE: Blood pressure looks slightly higher for the diabetes group, but the two box plots are very similar. No significant difference .
+
+-   BMI: BMI appears higher for patients with diabetes but not significantly different. This spread is a lot less for diabetes compared to no diabetes, meaning diabetes BMI are concentrated closer together.
+
+-   DIABETESPEDIGREEFUNCTION: The diabetes group has slightly higher values, and outliers have a higher concentration
+
+-   GLUCOSE: shows one of the clearest differences between the two groups. Patients with diabetes generally have higher glucose values.
+
+-   INSULIN: Insulin has many low values and several high outliers. The diabetes group have slightly higher insulin values, slightly lowere median and no diabetes have more outliers but there is a lot of overlap.
+
+-   PREGNANCY: The diabetes group appears to have a higher median number of pregnancies compared to the no-diabetes group. and diabetes has no outliers
+
+-   SKINTHICKNESS: Skin thickness looks similar between the two groups and lot of overlap but diabetes some outlines and slighly larger spread,
+
+```{r}
+
+numeric_predictors <- diabetes %>% select(where(is.numeric))
+
+correlation_matrix <- cor(numeric_data)
+
+corrplot(cor_matrix, method = "color",
+        addCoef.col = "black",
+        number.cex = 0.60,
+        tl.cex = 0.8)
+```
+
+The correlation plot shows that glucose has the strongest postive relationship with outcome at a correlation of 0.47. This might suggest that higher glucose values are associated with a higher chances of having diabetes. BMI , Age, Pregnancies and diabetesPedigreefunction also have positve correlations with glucose but weaker the glucose by about 0.20 less. The correlation plot also shows some predictor relationships to other predictors and have some moderate postive correlations. BMI and skinthicknes have 0.39 correlation , insuling and skinthickness have 0.44. Overral Glucose BMI Age Pregnancies and diabetesPedigreefunction may be useful preditocrs as well.
+
+```{r}
+outcome_correlations <- cor(diabetes %>% select(where(is.numeric))) %>%
+  as.data.frame() %>%
+  select(Outcome) %>%
+  arrange(desc(abs(Outcome)))
+
+outcome_correlations
+```
+
+```{r}
+diabetes %>% mutate(diabetes_status = factor(Outcome,levels = c(0, 1),
+                                labels = c("No Diabetes", "Diabetes"))) %>%
+select(Pregnancies, Glucose, BloodPressure, SkinThickness,
+         Insulin, BMI, DiabetesPedigreeFunction, Age, diabetes_status) %>%
+pivot_longer(cols = -diabetes_status,names_to = "Predictor",
+      values_to = "Value") %>%
+  
+ggplot(aes(x = Value, fill = diabetes_status)) +
+geom_density(alpha = 0.4) +
+facet_wrap(~ Predictor, scales = "free") +
+labs(title = "Density Plots of Predictors by Diabetes",
+x = "Measurement",
+y = "Density",
+fill = "Outcome") + theme_minimal()
+```
+
+-   The density plots compare the distribution of each predictor for patients with and without diabetes. Glucose shows the most distincition between the diabetes and no diabetes with the diabetes group having higher values. BMI, age, pregnancies and diabetespedigreefunction show some differences between the groups, suggesting they may be useful predictors but still have more overlap in densities. Bloodpressure, insulin, and skinthickness have the most overlap in desnsity between no diabeties and diabetes. Overall the density plots suggest that multiple variables will likely be needed to predict diabetes status.
+
+```{r}
+diabetes %>% mutate(diabetes_status = factor(Outcome, levels = c(0, 1),
+            labels = c("No Diabetes", "Diabetes"))) %>%
+  
+ggplot(aes(x = Glucose, y = BMI, color = diabetes_status)) +
+geom_point(alpha = 0.6) +
+labs(title = "Scatterplot of Glucose and BMI Diabetes Outcome",
+     x = "Glucose",
+     y = "BMI",
+    color = "Diabetes Outcome") + theme_minimal()
+```
+
+The scatterplot shows that diabetes cases appear more often at higher glucose values, with diabetes around 130 and above. There is still a lot of overlap between the diabetes and no-diabetes groups especially for BMI but diabetes has slighly here BMI. A few points also appear at glucose or BMI values of 0 which needs to be preprocessed.
+
+```{r}
+avg_predictors <- diabetes %>% mutate(diabetes_status = factor(Outcome,
+                               levels = c(0, 1),
+                               labels = c("No Diabetes", "Diabetes"))) %>%
+  group_by(diabetes_status) %>%
+  summarise(across(c(Pregnancies, Glucose, BloodPressure, SkinThickness,
+                     Insulin, BMI, DiabetesPedigreeFunction, Age),
+                   mean),
+            .groups = "drop") %>%
+  pivot_longer(cols = -diabetes_status,
+               names_to = "Predictor",
+               values_to = "Average")
+
+ggplot(avg_predictors, aes(x = diabetes_status, y = Average, fill = diabetes_status)) +
+geom_col(color = "black") +
+facet_wrap(~ Predictor, scales = "free") +
+labs(title = "Average Health Measurements by Diabetes Status",
+       x = "Diabetes Status",
+       y = "Average Measurement") + theme_minimal() +
+theme(legend.position = "none")
+
+```
+
+The average predictor values show that the diabetes group has higher averages for most variables. Glucose BMI and Insulin shows one of the clearest differences between the two groups averages.
+
+```{r}
+zero_summary %>%
+  filter(Variable != "Outcome") %>%
+  ggplot(aes(x = reorder(Variable, Zero_Percent), y = Zero_Percent)) +
+  geom_col(fill = "skyblue", color = "black") +
+  coord_flip() +
+  labs(title = "Percentage of Zero Values by Variables",
+       x = "Variable",
+       y = "Zero Values (%)") +
+  theme_minimal()
+```
+
+```{r}
+count_outliers <- function(x) {
+  Q1 <- quantile(x, 0.25)
+  Q3 <- quantile(x, 0.75)
+  IQR_value <- IQR(x)
+  lower_bound <- Q1 - 1.5 * IQR_value
+  upper_bound <- Q3 + 1.5 * IQR_value
+  sum(x < lower_bound | x > upper_bound)
+}
+
+outlier_summary <- diabetes %>%
+  select(Pregnancies, Glucose, BloodPressure, SkinThickness,
+         Insulin, BMI, DiabetesPedigreeFunction, Age) %>%
+  summarise(across(everything(), count_outliers)) %>%
+  pivot_longer(cols = everything(),
+               names_to = "Variable",
+               values_to = "Outlier_Count")
+outlier_summary
+```
+
+# Data Preprocessing
+
+```{r}
+diabetes_clean <- diabetes
+
+diabetes_clean$Outcome_Label <- NULL
+
+zero_na_vars <- c("Glucose", "BloodPressure", "SkinThickness", "Insulin", "BMI")
+
+diabetes_clean[zero_na_vars] <- lapply(diabetes_clean[zero_na_vars], function(x) {
+  ifelse(x == 0, NA, x)
+})
+
+diabetes_clean$Outcome <- factor(diabetes_clean$Outcome,
+                                 levels = c(0, 1),
+                                 labels = c("No_Diabetes", "Diabetes"))
+```
+
+Unrealistic zero values in glucose, bloodpressure, skinthickness, insulin and BMI were converted to NA because these values are not realistic medical measurements. Outcome the respons variable was also converted into a factor with two classes: No diabetes and Diabetes instead of just 0 and 1
+
+```{r}
+set.seed(123)
+
+train_index <- createDataPartition(diabetes_clean$Outcome,
+                                   p = 0.80,
+                                   list = FALSE)
+
+train_data <- diabetes_clean[train_index, ]
+test_data <- diabetes_clean[-train_index, ]
+
+train_medians <- sapply(train_data[zero_na_vars], median, na.rm = TRUE)
+```
+
+The cleaned dataset was split into training and testing sets using an 80/20 split. The training set will be used to build the models, while the testing set will be used to evaluate model performance on unseen data.
+
+After the split, median values were calculated using only the training data. These medians will be used to fill the missing values in both the training and testing sets. Calculating the medians from the training set helps avoid data leakage because the test set does not influence the preprocessing values.
+
+```{r}
+for (var in zero_na_vars) {
+  train_data[[var]][is.na(train_data[[var]])] <- train_medians[var]
+  test_data[[var]][is.na(test_data[[var]])] <- train_medians[var]
+}
+
+colSums(is.na(train_data))
+colSums(is.na(test_data))
+
+
+dim(train_data)
+dim(test_data)
+
+prop.table(table(train_data$Outcome))
+prop.table(table(test_data$Outcome))
+```
+
+Missing values in the training and testing sets were filled using median values calculated from the training set. After imputation both sets had 0 missing values.
+
+The final split produced 615 training observations and 153 testing observations.
+
+```{r}
+
+train_medians
+```
+
+The training medians show the values used to replace missing measurements in both the training and testing sets. These values were calculated from the training data only to avoid data leakage.
