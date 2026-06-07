@@ -16,17 +16,23 @@ The goal of this analysis is to build and compare classification models to predi
 # Data Description
 
 ```{r}
+#| message: false
+#| warning: false
 library(tidyverse)
 library(caret)
 library(corrplot)
 library(rpart)
 library(rpart.plot)
+library(randomForest)
+library(e1071)
+library(gbm)
+library(pROC)
 
 set.seed(123)
 ```
 
 ```{r}
-diabetes <- read.csv("C:/Users/apexe/Downloads/diabetes.csv")
+diabetes <- read.csv("diabetes.csv")
 head(diabetes)
 dim(diabetes)
 names(diabetes)
@@ -173,20 +179,6 @@ theme_minimal() + theme(legend.position = "none")
 - SKINTHICKNESS: Skin thickness looks similar between the two groups and a lot of overlap but diabetes has some outliers and a slightly larger spread.
 
 ```{r}
-
-numeric_predictors <- diabetes %>% select(where(is.numeric))
-
-cor_matrix <- cor(numeric_predictors)
-
-corrplot(cor_matrix, method = "color",
-        addCoef.col = "black",
-        number.cex = 0.60,
-        tl.cex = 0.8)
-```
-
-The correlation plot shows that glucose has the strongest positive relationship with outcome at a correlation of 0.47. This suggests that higher glucose values are associated with a higher chance of having diabetes. BMI , Age, Pregnancies and diabetesPedigreefunction also have positive correlations with the outcome variable, but these relationships are weaker than the correlation between glucose and outcome. The correlation plot also shows moderate positive relationships among some predictors. BMI and skinthicknes have a correlation of 0.39, while insulin and skinthickness have a correlation of 0.44. Overall Glucose, BMI, Age, Pregnancies and diabetesPedigreefunction may be useful predictors.
-
-```{r}
 outcome_correlations <- cor(diabetes %>% select(where(is.numeric))) %>%
   as.data.frame() %>%
   select(Outcome) %>%
@@ -299,8 +291,6 @@ outlier_summary
 ```{r}
 diabetes_clean <- diabetes
 
-diabetes_clean$Outcome_Label <- NULL
-
 zero_na_vars <- c("Glucose", "BloodPressure", "SkinThickness", "Insulin", "BMI")
 
 diabetes_clean[zero_na_vars] <- lapply(diabetes_clean[zero_na_vars], function(x) {
@@ -358,3 +348,199 @@ train_medians
 ```
 
 The training medians show the values used to replace missing measurements in both the training and testing sets. These values were calculated from the training data only to avoid data leakage.
+
+```{r}
+numeric_predictors <- train_data %>% select(where(is.numeric))
+cor_matrix <- cor(numeric_predictors)
+
+corrplot(cor_matrix, method = "color",
+        addCoef.col = "black",
+        number.cex = 0.60,
+        tl.cex = 0.8)
+```
+
+The correlation plot shows that glucose has the strongest positive relationship with outcome at a correlation of 0.47. This suggests that higher glucose values are associated with a higher chance of having diabetes. BMI , Age, Pregnancies and diabetesPedigreefunction also have positive correlations with the outcome variable, but these relationships are weaker than the correlation between glucose and outcome. The correlation plot also shows moderate positive relationships among some predictors. BMI and skinthicknes have a correlation of 0.39, while insulin and skinthickness have a correlation of 0.44. Overall Glucose, BMI, Age, Pregnancies and diabetesPedigreefunction may be useful predictors.
+
+# Modeling
+
+Scale features for KNN and SVN
+
+```{r}
+# Features to scale 
+scale_vars <- c("Pregnancies", "Glucose", "BloodPressure", "SkinThickness",
+                "Insulin", "BMI", "DiabetesPedigreeFunction", "Age")
+ 
+train_scaled <- train_data
+test_scaled  <- test_data
+ 
+# Scale using TRAINING means and SDs only (no leakage)
+train_means <- colMeans(train_data[scale_vars])
+train_sds   <- apply(train_data[scale_vars], 2, sd)
+ 
+train_scaled[scale_vars] <- scale(train_data[scale_vars])
+test_scaled[scale_vars]  <- scale(test_data[scale_vars],
+                                  center = train_means,
+                                  scale  = train_sds)
+```
+
+Since KNN and SVM are distance-based algorithms, all features were standardised using the mean and standard deviation calculated from the training set only to avoid data leakage.
+
+Extract metrics from confusion matrix
+```{r}
+get_metrics <- function(pred, actual, model_name, prob = NULL) {
+  cm <- confusionMatrix(pred, actual, positive = "Diabetes")
+  auc_val <- if (!is.null(prob)) {
+    roc_obj <- roc(actual, prob, levels = c("No_Diabetes", "Diabetes"), quiet = TRUE)
+    round(auc(roc_obj), 4)
+  } else NA
+ 
+  data.frame(
+    Model       = model_name,
+    Accuracy    = round(cm$overall["Accuracy"], 4),
+    Sensitivity = round(cm$byClass["Sensitivity"], 4),
+    Specificity = round(cm$byClass["Specificity"], 4),
+    F1          = round(cm$byClass["F1"], 4),
+    AUC         = auc_val
+  )
+}
+
+```
+
+## Logistic Regression
+
+```{r}
+set.seed(123)
+log_model <- glm(Outcome ~ ., data = train_data, family = binomial)
+summary(log_model)
+ 
+log_prob <- predict(log_model, newdata = test_data, type = "response")
+log_pred <- factor(ifelse(log_prob >= 0.5, "Diabetes", "No_Diabetes"),
+                   levels = c("No_Diabetes", "Diabetes"))
+ 
+cm_log <- confusionMatrix(log_pred, test_data$Outcome, positive = "Diabetes")
+cm_log
+
+```
+
+## Decision Tree
+
+```{r}
+set.seed(123)
+tree_model <- rpart(Outcome ~ ., data = train_data, method = "class",
+                    control = rpart.control(cp = 0.01))
+rpart.plot(tree_model, main = "Decision Tree")
+ 
+tree_prob <- predict(tree_model, newdata = test_data, type = "prob")[, "Diabetes"]
+tree_pred <- predict(tree_model, newdata = test_data, type = "class")
+ 
+cm_tree <- confusionMatrix(tree_pred, test_data$Outcome, positive = "Diabetes")
+cm_tree
+
+```
+
+## Random Forest
+
+```{r}
+set.seed(123)
+rf_model <- randomForest(Outcome ~ ., data = train_data,
+                         ntree = 500, importance = TRUE)
+rf_model
+ 
+rf_prob <- predict(rf_model, newdata = test_data, type = "prob")[, "Diabetes"]
+rf_pred <- predict(rf_model, newdata = test_data, type = "class")
+ 
+cm_rf <- confusionMatrix(rf_pred, test_data$Outcome, positive = "Diabetes")
+cm_rf
+ 
+# Variable importance plot
+varImpPlot(rf_model, main = "Random Forest Variable Importance")
+
+```
+
+## KNN
+
+```{r}
+set.seed(123)
+ 
+# Use cross-validation to find the best k
+ctrl <- trainControl(method = "cv", number = 5,
+                     classProbs = TRUE, summaryFunction = twoClassSummary)
+ 
+knn_cv <- train(Outcome ~ ., data = train_scaled,
+                method = "knn",
+                trControl = ctrl,
+                metric = "ROC",
+                tuneGrid = data.frame(k = seq(3, 21, by = 2)))
+ 
+best_k <- knn_cv$bestTune$k
+cat("Best k:", best_k, "\n")
+plot(knn_cv, main = "KNN Cross-Validation: k vs AUC")
+ 
+knn_prob <- predict(knn_cv, newdata = test_scaled, type = "prob")[, "Diabetes"]
+knn_pred <- predict(knn_cv, newdata = test_scaled)
+ 
+cm_knn <- confusionMatrix(knn_pred, test_scaled$Outcome, positive = "Diabetes")
+cm_knn
+
+```
+
+## SVM
+
+```{r}
+set.seed(123)
+svm_model <- svm(Outcome ~ ., data = train_scaled,
+                 kernel = "radial", probability = TRUE, cost = 1)
+ 
+svm_raw  <- predict(svm_model, newdata = test_scaled, probability = TRUE)
+svm_pred <- svm_raw
+svm_prob <- attr(svm_raw, "probabilities")[, "Diabetes"]
+ 
+cm_svm <- confusionMatrix(svm_pred, test_scaled$Outcome, positive = "Diabetes")
+cm_svm
+```
+
+## Gradient Boosting
+
+```{r}
+set.seed(123)
+ 
+# gbm needs numeric outcome
+train_gbm <- train_data
+test_gbm  <- test_data
+train_gbm$Outcome_num <- ifelse(train_gbm$Outcome == "Diabetes", 1, 0)
+train_gbm$Outcome     <- NULL
+ 
+gbm_model <- gbm(Outcome_num ~ ., data = train_gbm,
+                 distribution = "bernoulli",
+                 n.trees = 500, interaction.depth = 3,
+                 shrinkage = 0.01, cv.folds = 5, verbose = FALSE)
+ 
+best_trees <- gbm.perf(gbm_model, method = "cv", plot.it = TRUE)
+cat("Best number of trees:", best_trees, "\n")
+ 
+gbm_prob <- predict(gbm_model, newdata = test_gbm,
+                    n.trees = best_trees, type = "response")
+gbm_pred <- factor(ifelse(gbm_prob >= 0.5, "Diabetes", "No_Diabetes"),
+                   levels = c("No_Diabetes", "Diabetes"))
+ 
+cm_gbm <- confusionMatrix(gbm_pred, test_data$Outcome, positive = "Diabetes")
+cm_gbm
+
+```
+
+## Model Comparsion Table
+
+```{r}
+results <- rbind(
+  get_metrics(log_pred,  test_data$Outcome,        "Logistic Regression", log_prob),
+  get_metrics(tree_pred, test_data$Outcome,        "Decision Tree",       tree_prob),
+  get_metrics(rf_pred,   test_data$Outcome,        "Random Forest",       rf_prob),
+  get_metrics(knn_pred,  test_scaled$Outcome,      "KNN",                 knn_prob),
+  get_metrics(svm_pred,  test_scaled$Outcome,      "SVM",                 svm_prob),
+  get_metrics(gbm_pred,  test_data$Outcome,        "Gradient Boosting",   gbm_prob)
+)
+ 
+rownames(results) <- NULL
+ 
+knitr::kable(results, caption = "Model Performance Comparison")
+```
