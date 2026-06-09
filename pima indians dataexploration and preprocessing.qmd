@@ -350,7 +350,10 @@ train_medians
 The training medians show the values used to replace missing measurements in both the training and testing sets. These values were calculated from the training data only to avoid data leakage.
 
 ```{r}
-numeric_predictors <- train_data %>% select(where(is.numeric))
+numeric_predictors <- train_data %>% 
+  mutate(Outcome = as.numeric(Outcome)) %>%
+  select(where(is.numeric))
+
 cor_matrix <- cor(numeric_predictors)
 
 corrplot(cor_matrix, method = "color",
@@ -359,7 +362,7 @@ corrplot(cor_matrix, method = "color",
         tl.cex = 0.8)
 ```
 
-The correlation plot shows that glucose has the strongest positive relationship with outcome at a correlation of 0.47. This suggests that higher glucose values are associated with a higher chance of having diabetes. BMI , Age, Pregnancies and diabetesPedigreefunction also have positive correlations with the outcome variable, but these relationships are weaker than the correlation between glucose and outcome. The correlation plot also shows moderate positive relationships among some predictors. BMI and skinthicknes have a correlation of 0.39, while insulin and skinthickness have a correlation of 0.44. Overall Glucose, BMI, Age, Pregnancies and diabetesPedigreefunction may be useful predictors.
+The correlation plot shows that glucose has the strongest positive relationship with outcome at a correlation of 0.49. This suggests that higher glucose values are associated with a higher chance of having diabetes. BMI, Age, Pregnancies and DiabetesPedigreeFunction also have positive correlations with the outcome variable, but these relationships are weaker than the correlation between glucose and outcome. The correlation plot also shows moderate positive relationships among some predictors. BMI and SkinThickness have a correlation of 0.56, while Insulin and Glucose have a correlation of 0.42. Overall Glucose, BMI, Age, Pregnancies and DiabetesPedigreeFunction may be useful predictors.
 
 # Modeling
 
