@@ -15,14 +15,6 @@ This project predicts whether a patient has diabetes using clinical measurements
 
 Unrealistic zero values in Glucose, BloodPressure, SkinThickness, Insulin, and BMI were treated as missing and imputed using training-set medians after the train/test split, to avoid data leakage.
 
-## Repository Contents
-
-| File | Description |
-|---|---|
-| `pima_indians_dataexploration_and_preprocessing.qmd` | Full Quarto report: EDA, preprocessing, model training, evaluation, and ROC comparison |
-| `diabetes.csv` | Raw dataset |
-| `README.md` | This file |
-
 ## Methods
 
 Models trained and compared on an 80/20 train/test split:
