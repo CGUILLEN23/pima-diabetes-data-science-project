@@ -49,17 +49,6 @@ KNN and SVM features were scaled using training-set statistics applied to both s
 
 **Random Forest** was selected as the final model, providing the best overall balance of accuracy, sensitivity, and F1 while maintaining strong specificity. Gradient Boosting had the highest AUC. Glucose was the strongest predictor of diabetes status across models.
 
-## How to Run
-
-1. Open `pima_indians_dataexploration_and_preprocessing.qmd` in RStudio.
-2. Ensure `diabetes.csv` is in the same folder as the `.qmd` file.
-3. Install required packages if needed:
-   ```r
-   install.packages(c("tidyverse", "caret", "corrplot", "rpart", "rpart.plot",
-                       "randomForest", "e1071", "gbm", "pROC"))
-   ```
-4. Click **Render** to generate the full HTML report.
-
 ## Team
 
 Christopher Guillen, Andrew Hashoush, Christopher Andra
