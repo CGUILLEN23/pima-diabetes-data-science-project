@@ -1,6 +1,6 @@
 # Diabetes Risk Prediction: Pima Indians Diabetes Dataset
 
-Final team project for ADS-503: Applied Predictive Modeling, University of San Diego.
+Final team project for ADS-503: Applied Predictive Modeling
 
 ## Overview
 
