@@ -549,6 +549,8 @@ rownames(results) <- NULL
 knitr::kable(results, caption = "Model Performance Comparison")
 ```
 
+## ROC Graph
+
 ```{r}
 roc_log  <- roc(test_data$Outcome,    log_prob,  levels = c("No_Diabetes", "Diabetes"), quiet = TRUE)
 roc_tree <- roc(test_data$Outcome,    tree_prob, levels = c("No_Diabetes", "Diabetes"), quiet = TRUE)
